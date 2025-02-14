@@ -3,12 +3,14 @@ from colorama import Fore, Style
 import pyfiglet
 import json
 import asyncio
+import sys
 
 from kontenjan import Kontenjan
 from basvuru import Basvuru
 
 class Main():
     def __init__(self, bilgiler):
+        # Otomatik renk resetleme işlemi
         colorama.init(autoreset=True)  
         
         self.kontenjan = Kontenjan(bilgiler)
@@ -23,12 +25,34 @@ class Main():
         await asyncio.sleep(0.2)
         print(Fore.YELLOW + "[👻] Merhaba...")
         await asyncio.sleep(0.2)
-        print(Fore.GREEN + "[👾] Başlamadan önceee...")
+        print(Fore.LIGHTWHITE_EX + "[👾] Başlamadan önceee...")
+        await asyncio.sleep(0.2)
+        print(Fore.CYAN + "[🫷] Lütfen sayfaların açılmasını bekleyiniz!!!")
         #await asyncio.sleep(0.2)
-        await asyncio.gather(
-        self.kontenjan.basla(headless=True),
-        self.basvuru.basla(headless=True)
-        )  
+        try:
+            # kontenjan.basla() ve basvuru.basla() fonksiyonlarını eş zamanlı çalıştır
+            await asyncio.gather(
+            # headless=True ile arka planda çalıştırır
+            self.kontenjan.basla(headless=True), 
+            self.basvuru.basla(headless=True)
+            )  
+            # Arka planda E-Devlet girişi yap
+            # Captcha varsa çözülene kadar bekler
+            await self.basvuru.e_devlet_giris()
+            print(Fore.GREEN + f"[🥳] Captcha çözüldü devam edebilirizzz")
+        except Exception as e:
+            print(Fore.RED + f"[❌] Hata, sayfalara erişilemedi, bilgilerinizi kontrol ediniz: {str(e)}")
+            
+            # Eğer `self.basvuru` başlatılmışsa bitir
+            if hasattr(self, "browser") and self.basvuru:
+                await self.basvuru.bitir()
+
+            # Eğer `self.kontenjan` başlatılmışsa bitir
+            if hasattr(self, "browser") and self.kontenjan:
+                await self.kontenjan.bitir()
+            # Başarısız çıkış -> 1
+            sys.exit(1)
+            
         while True: 
             yanit = input(Fore.BLUE + "[👀] Bilgileri değiştirmek ister misin???(Y/n) : ")
             if yanit.lower() == 'y':
@@ -47,13 +71,14 @@ class Main():
                     elif ret.lower() == 'd':
                         await asyncio.sleep(0.2)
                     else:
-                        print(Fore.RED + "[��] Geçersiz giriş. Lütfen tekrar deneyin.")
+                        print(Fore.RED + "[❌] Geçersiz giriş. Lütfen tekrar deneyin.")
                         await asyncio.sleep(0.2)
                         continue
                 break
                 
             elif yanit.lower() == 'n':
                 print(Fore.LIGHTMAGENTA_EX + "[🎉] O zaman başlıyoruuz!!!")
+                await asyncio.sleep(0.2)
                 await self.kontrol_et()
                 break
             
@@ -65,7 +90,13 @@ class Main():
         while True:
             print(Fore.YELLOW + "[👀] Kontenjan Kontrolü...")
             await asyncio.sleep(0.2)
-            kontenjan_sayisi = await self.kontenjan.kontenjan_kontrol()
+            try:
+                kontenjan_sayisi = await self.kontenjan.kontenjan_kontrol()
+            except Exception as e:
+                # Sayfa, onay gününde girişlere kapalı olur
+                print(Fore.RED + f"[❌] Hata, sayfa kapalı olabilir: {str(e)}")
+                await self.kontenjan.bitir()
+                break
             await self.kontenjan.bitir()
             print(Fore.GREEN + f"[🔢] Kontenjan sayısı: {kontenjan_sayisi}")
             await asyncio.sleep(0.2)
@@ -102,68 +133,94 @@ class Main():
 [14] GİDİLECEK OKUL DALI
 [15] GİDİLECEK OKUL
 [16] YABANCI DİL
+[17] KONTROL ARALIK SIKLIĞI
         """)
         await asyncio.sleep(0.2)
         print(Fore.RED + "[🤓] NOT: Her şeyi doldurmak zorunda değilsiniz boş kalabilir!!!")
-        await self.basvuru.e_devlet_giris()
+        await asyncio.sleep(0.2)
+        print(Fore.LIGHTYELLOW_EX + "[❎] Çıkış yapmak için 'x' e basınız!")
         return input("\n" + Fore.GREEN + "Lütfen seçimini giriniz(!sayı!) : ")
     
+    async def secenek_gir(self, degisken, ad, json_ad):
+        # Giriş verilerinde uyuşmazlık varsa hata döndür
+        if degisken == []:
+            print(Fore.RED + f"[🔺] Hata, {ad} alınamadı!!")
+            await self.kontenjan.bitir()
+            await self.basvuru.bitir()
+            sys.exit(1)
+        # Seçeneklerin listelenip indexlerine göre kullanıcıya sunulur
+        for idx, secenek in enumerate(degisken, start=1):
+            print(f"[{idx}] {secenek}")
+        secenek = int(input("\n" + Fore.LIGHTRED_EX + f"{ad} Seçiniz: "))
+        self.bilgiler[f"{json_ad}"] = degisken[secenek - 1]
+    
     async def secim_yap(self, secim):
-        match secim:
-            case '1':
-                self.bilgiler["kimlik_no"] = input("TC Kimlik No Girin: ")
-            case '2':
-                self.bilgiler["okul_no"] = input("Okul No Girin: ")
-            case '3':
-                iller = await self.kontenjan.illeri_listele()
-                print()
-                for idx, secenek in enumerate(iller, start=1):
-                    print(f"[{idx}] {secenek}")
-                secenek = int(input("\n" + Fore.LIGHTRED_EX + "İl Seçiniz: "))
-                self.bilgiler["il"] = iller[secenek - 1]
-            case '4':
-                ilceler = await self.kontenjan.ilceleri_listele()
-                print()
-                for idx, secenek in enumerate(ilceler, start=1):
-                    print(f"[{idx}] {secenek}")
-                secenek = int(input("\n" + Fore.LIGHTRED_EX + "İlçe Seçiniz: "))
-                self.bilgiler["ilce"] = ilceler[secenek - 1]
-            case '5':
-                kurum_turu = await self.kontenjan.kurum_turleri_listele()
-                print()
-                for idx, secenek in enumerate(kurum_turu, start=1):
-                    print(f"[{idx}] {secenek}")
-                secenek = int(input("\n" + Fore.LIGHTRED_EX + "Kurum Türü Seçiniz: "))
-                self.bilgiler["kurum_turu"] = kurum_turu[secenek - 1]
-            case '6':
-                alanlar = await self.kontenjan.kayit_alanlari_listele()
-                print()
-                for idx, secenek in enumerate(alanlar, start=1):
-                    print(f"[{idx}] {secenek}")
-                secenek = int(input("\n" + Fore.LIGHTRED_EX + "Kayıt Alanı Seçiniz: "))
-                self.bilgiler["kayit_alani"] = alanlar[secenek - 1]
-            case '7':
-                okullar = await self.kontenjan.okullari_listele()
-                print()
-                for idx, secenek in enumerate(okullar, start=1):
-                    print(f"[{idx}] {secenek}")
-                secenek = int(input("\n" + Fore.LIGHTRED_EX + "Okul Seçiniz: "))
-                self.bilgiler["okul"] = okullar[secenek - 1]
-            case '8':
-                self.bilgiler["sinif"] = input("Sınıf Girin: ")
-            case '9':
-                self.bilgiler["edevlet_no"] = input("E-Devlet Kimlik No Girin: ")
-            case '10':
-                self.bilgiler["edevlet_sifre"] = input("E-Devlet Şifre Girin: ")
-            case '11':
-                nedenler = await self.basvuru.nedenleri_listele()
-                print()
-                for idx, secenek in enumerate(nedenler, start=1):
-                    print(f"[{idx}] {secenek}")
-                secenek = int(input("\n" + Fore.LIGHTRED_EX + "Neden Seçiniz: "))
-                self.bilgiler["nakil_nedeni"] = nedenler[secenek - 1]
+        print()
+        try:
+            match secim:
+                case '1':
+                    self.bilgiler["kimlik_no"] = input("TC Kimlik No Girin: ")
+                case '2':
+                    self.bilgiler["okul_no"] = input("Okul No Girin: ")
+                case '3':
+                    iller = await self.kontenjan.illeri_listele()
+                    await self.secenek_gir(iller, "İl", "il")
+                case '4':
+                    ilceler = await self.kontenjan.ilceleri_listele()
+                    await self.secenek_gir(ilceler, "İlce", "ilce")
+                case '5':
+                    kurum_turu = await self.kontenjan.kurum_turleri_listele()
+                    await self.secenek_gir(kurum_turu, "Kurum Türü", "kurum_turu")
+                case '6':
+                    alanlar = await self.kontenjan.kayit_alanlari_listele()
+                    await self.secenek_gir(alanlar, "Kayıt Alanı", "kayit_alani")
+                case '7':
+                    okullar = await self.kontenjan.okullari_listele()
+                    await self.secenek_gir(okullar, "Okul", "okul")
+                case '8':
+                    self.bilgiler["sinif"] = input("Sınıf Girin: ")
+                case '9':
+                    self.bilgiler["edevlet_no"] = input("E-Devlet Kimlik No Girin: ")
+                case '10':
+                    self.bilgiler["edevlet_sifre"] = input("E-Devlet Şifre Girin: ")
+                case '11':
+                    nedenler = await self.basvuru.nedenleri_listele()
+                    await self.secenek_gir(nedenler, "Neden", "nakil_nedeni")
+                case '12':
+                    turler = await self.basvuru.turleri_listele()
+                    await self.secenek_gir(turler, "Tür", "gidilecek_tur")
+                case '13':
+                    alanlar = await self.basvuru.alanlari_listele()
+                    await self.secenek_gir(alanlar, "Okul Alanı", "gidilecek_alan")
+                case '14':
+                    dallar = await self.basvuru.dallari_listele()
+                    await self.secenek_gir(dallar, "Okul Dalı", "gidilecek_dal")
+                case '15':
+                    okullar = await self.basvuru.okullari_listele()
+                    await self.secenek_gir(okullar, "Okul", "gidilecek_okul")
+                case '16':
+                    diller = await self.basvuru.dilleri_listele()
+                    await self.secenek_gir(diller, "Dil", "yabanci_dil")
+                case '17':
+                    self.saniye = int(input("Kontrol Aralık Sıklığı (saniye): "))
+                    self.bilgiler["saniye"] = self.saniye
+                case 'x' | 'X':
+                    await self.kontenjan.bitir()
+                    await self.basvuru.bitir()
+                    # Başarılı çıkış -> 0
+                    sys.exit(0)
+                case _:
+                    print(Fore.LIGHTRED_EX + "Geçersiz Seçim!")
+                    await asyncio.sleep(0.5)
+                    return await self.secim_yap(secim)
+        except Exception as e:
+            print(Fore.RED + f"[❌] Hata, sayfada giriş yapılamıyor olabilir: {str(e)}")
+            await self.kontenjan.bitir()
+            sys.exit(1)
+                
         await asyncio.sleep(0.2)
-        with open("bilgiler.json", "w", encoding="utf-8") as file:
+        # Girilen verileri json dosyasına yazdır
+        with open("config.json", "w", encoding="utf-8") as file:
             json.dump(self.bilgiler, file, indent=4, ensure_ascii=False)
         
         return input("\n" + Fore.LIGHTRED_EX + "Tamam mı, Devam mı??(T/D): ")
@@ -173,7 +230,7 @@ async def main_basla():
         
 if __name__ == "__main__":
     # Bilgileri json dosyasından oku
-    with open("bilgiler.json", 'r', encoding='utf-8') as file:
+    with open("config.json", 'r', encoding='utf-8') as file:
         json_bilgiler = json.load(file)
         
     main = Main(json_bilgiler)

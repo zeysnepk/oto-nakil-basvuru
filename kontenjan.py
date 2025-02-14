@@ -39,7 +39,6 @@ class Kontenjan():
             self.browser = await self.playwright.chromium.launch(headless=headless)
             self.page = await self.browser.new_page()
             await self.page.goto(self.url, wait_until="networkidle")
-            print("Kontenjan tamam")
             await self.page.wait_for_timeout(100)
             
     async def bitir(self):
@@ -106,7 +105,7 @@ class Kontenjan():
         return int(kontenjan)
     
     async def secenekleri_dondur(self, name):
-        #await self.page.wait_for_selector(name, state="visible", timeout=5000)
+        await self.page.wait_for_selector(name, state="attached", timeout=5000)
         secenekler = await self.page.locator(name).all_inner_texts()
         await self.page.wait_for_timeout(100)
         return secenekler
@@ -142,8 +141,8 @@ class Kontenjan():
 async def main_basla(kontenjan):
         await kontenjan.basla()
         #print("Kontenjan: ", await kontenjan.kontenjan_kontrol())
-        print(await kontenjan.okullari_listele())
-        print("Okul Sayısı: ", await kontenjan.okul_sayisi())
+        print(await kontenjan.ilceleri_listele())
+        #print("Okul Sayısı: ", await kontenjan.okul_sayisi())
         await kontenjan.bitir()
         """
     except Exception as e:
@@ -151,7 +150,7 @@ async def main_basla(kontenjan):
         await kontenjan.bitir()"""
     
 if __name__ == "__main__":
-    with open("bilgiler.json", 'r', encoding='utf-8') as file:
+    with open("config.json", 'r', encoding='utf-8') as file:
         json_bilgiler = json.load(file)
     kontenjan = Kontenjan(json_bilgiler)
     asyncio.run(main_basla(kontenjan))

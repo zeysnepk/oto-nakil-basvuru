@@ -44,7 +44,6 @@ class Basvuru():
             self.page = await self.browser.new_page()
             await self.page.goto(self.edevlet_url, wait_until="networkidle")
             self.page.on("dialog", lambda dialog: dialog.accept())
-            print("Basvuru tamam")
             await self.page.wait_for_timeout(100)
             
     async def bitir(self):
@@ -117,7 +116,7 @@ class Basvuru():
         
     async def e_devlet_giris(self):
         await self.page.locator(self.dogrula_buton).click()     
-        await self.page.wait_for_timeout(100)
+        await self.page.wait_for_timeout(1000)
         await self.doldur(self.tc_input, self.bilgiler["edevlet_no"])  
         await self.doldur(self.sifre_input, self.bilgiler["edevlet_sifre"])
         await self.page.locator(self.giris_buton).click()
@@ -149,9 +148,10 @@ class Basvuru():
             else: 
                 print("captcha yok")
                 break
-            
+        # Butonun sayfada görünmesini bekle
+        await self.page.wait_for_selector(self.baglan_buton, state="visible", timeout=5000)
         # Butona bastıktan sonra yeni açılan pop-up bilgisi
-        async with self.page.expect_popup() as popup_info:
+        async with self.page.expect_popup(timeout=60000) as popup_info:
             await self.page.locator(self.baglan_buton).click() 
 
         # Yeni açılan sayfaya geç
@@ -167,7 +167,7 @@ class Basvuru():
         return await self.basvuru_sayfasi.locator('#lblHata').inner_text()
     
     async def secenekleri_dondur(self, name):
-        #await self.basvuru_sayfasi.wait_for_selector(name, state="visible", timeout=5000)
+        await self.basvuru_sayfasi.wait_for_selector(name, state="attached", timeout=5000)
         secenekler = await self.basvuru_sayfasi.locator(name).all_inner_texts()
         await self.basvuru_sayfasi.wait_for_timeout(100)
         return secenekler
@@ -179,30 +179,30 @@ class Basvuru():
         return await self.secenekleri_dondur('#ddlNakilTurleri > option')
     
     async def alanlari_listele(self):
-        self.tur_gir()
+        await self.tur_gir()
         return await self.secenekleri_dondur('#ddlNakilAlanlari > option')
     
-    async def dalari_listele(self):
-        self.tur_gir()
-        self.alan_gir()
+    async def dallari_listele(self):
+        await self.tur_gir()
+        await self.alan_gir()
         return await self.secenekleri_dondur('#ddlNakilDali > option')
     
     async def illeri_listele(self):
         return await self.secenekleri_dondur('#ddlBasvuruIli > option')
     
     async def okullari_listele(self):
-        self.tur_gir()
-        self.alan_gir()
-        self.dal_gir()
-        self.il_gir()
+        await self.tur_gir()
+        await self.alan_gir()
+        await self.dal_gir()
+        await self.il_gir()
         return await self.secenekleri_dondur('#ddlBasvuruKurum > option')
     
     async def dilleri_listele(self):
-        self.tur_gir()
-        self.alan_gir()
-        self.dal_gir()
-        self.il_gir()
-        self.okul_gir()
+        await self.tur_gir()
+        await self.alan_gir()
+        await self.dal_gir()
+        await self.il_gir()
+        await self.okul_gir()
         return await self.secenekleri_dondur('#ddlOkulYabanciDil > option')
     
     async def basvur(self):
@@ -227,7 +227,7 @@ async def main_basla(basvuru):
         print("Başvuru Yapılamadı: ", str(e))"""
     
 if __name__ == "__main__":
-    with open("bilgiler.json", 'r', encoding='utf-8') as file:
+    with open("config.json", 'r', encoding='utf-8') as file:
         json_bilgiler = json.load(file)
     basvuru = Basvuru(json_bilgiler)
     asyncio.run(main_basla(basvuru))
