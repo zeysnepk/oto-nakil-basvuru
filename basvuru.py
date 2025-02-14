@@ -3,6 +3,8 @@ import asyncio
 from playwright.async_api import async_playwright
 import easyocr
 
+json_dosyasi = "config.json"
+
 class Basvuru():
     def __init__(self, bilgiler):
         self.bilgiler = bilgiler
@@ -227,7 +229,7 @@ async def main_basla(basvuru):
         print("Başvuru Yapılamadı: ", str(e))"""
     
 if __name__ == "__main__":
-    with open("config.json", 'r', encoding='utf-8') as file:
+    with open(json_dosyasi, 'r', encoding='utf-8') as file:
         json_bilgiler = json.load(file)
     basvuru = Basvuru(json_bilgiler)
     asyncio.run(main_basla(basvuru))

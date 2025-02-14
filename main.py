@@ -8,6 +8,8 @@ import sys
 from kontenjan import Kontenjan
 from basvuru import Basvuru
 
+json_dosyasi = "config.json"
+
 class Main():
     def __init__(self, bilgiler):
         # Otomatik renk resetleme işlemi
@@ -220,7 +222,7 @@ class Main():
                 
         await asyncio.sleep(0.2)
         # Girilen verileri json dosyasına yazdır
-        with open("config.json", "w", encoding="utf-8") as file:
+        with open(json_dosyasi, "w", encoding="utf-8") as file:
             json.dump(self.bilgiler, file, indent=4, ensure_ascii=False)
         
         return input("\n" + Fore.LIGHTRED_EX + "Tamam mı, Devam mı??(T/D): ")
@@ -230,7 +232,7 @@ async def main_basla():
         
 if __name__ == "__main__":
     # Bilgileri json dosyasından oku
-    with open("config.json", 'r', encoding='utf-8') as file:
+    with open(json_dosyasi, 'r', encoding='utf-8') as file:
         json_bilgiler = json.load(file)
         
     main = Main(json_bilgiler)

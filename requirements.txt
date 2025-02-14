@@ -3,5 +3,3 @@ pyfiglet
 asyncio
 playwright
 easyocr
-requests
-BeautifulSoup4
