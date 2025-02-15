@@ -29,6 +29,8 @@ class Main():
         
         self.saniye = int(bilgiler["saniye"])
         self.bilgiler = bilgiler
+        
+        self.basvuru_acik = False
     
     async def yanit_bekle(self):
         try:
@@ -92,12 +94,13 @@ class Main():
                 
     async def basvuru_ac(self):
         try:
-            if hasattr(self.basvuru, "basla"):
+            if self.basvuru_acik:
                 await self.guvenli_bitir(self.basvuru, "Başvuru Sayfası")
             await self.basvuru.basla(headless=True)
             await asyncio.sleep(1)
             await self.basvuru.e_devlet_giris()
             print(Fore.GREEN + f"[🥳] Captcha çözüldü devam edebilirizzz")
+            self.basvuru_acik = True
         except Exception as e:
             print(Fore.RED + f"[❌] Açılış hatası, başvuru sayfasına erişilemedi. Bilgilerinizi veya internetinizi kontrol ediniz: {str(e)}")
             await self.yeniden_basla("B")
@@ -123,6 +126,7 @@ class Main():
                 print(Fore.CYAN + f"[⭐️] Kontenjan Bulundu Başvuruya Başlanıyor...")
                 await self.basvuru_ac()
                 await asyncio.sleep(1)
+                await self.mail_gonder("Kontenjan Bulundu Başvuruya Başlanıyor...")
                 mesaj = await self.basvuru.basvur()
                 print(Fore.RED + f"[❓] Başvuru Sonucu: {mesaj}")
                 await self.mail_gonder(mesaj)
@@ -303,7 +307,7 @@ class Main():
             msg["From"] = self.mail_gonderen
             msg["To"] = self.mail_alan
             msg["Subject"] = f"{self.bilgiler["okul"]} kontenjan bulundu!"
-            msg.attach(MIMEText(f"{self.bilgiler["kimlik_no"]} numaları öğrencinin nakil başvuru sonucu:\n{mesaj}", "plain"))
+            msg.attach(MIMEText(f"{self.bilgiler["kimlik_no"]} numaralı öğrencinin nakil başvuru bilgilendirme:\n{mesaj}", "plain"))
             
             server.sendmail(self.mail_gonderen, self.mail_alan, msg.as_string())
             server.quit()
