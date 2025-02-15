@@ -10,7 +10,7 @@ import time
 from kontenjan import Kontenjan
 from basvuru import Basvuru
 
-json_dosyasi = "bilgiler.json"
+json_dosyasi = "config.json"
 
 import smtplib
 from email.mime.text import MIMEText
