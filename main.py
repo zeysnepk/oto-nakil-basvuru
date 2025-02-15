@@ -4,14 +4,24 @@ import pyfiglet
 import json
 import asyncio
 import sys
+import socket
+import time
 
 from kontenjan import Kontenjan
 from basvuru import Basvuru
 
-json_dosyasi = "config.json"
+json_dosyasi = "bilgiler.json"
+
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 class Main():
     def __init__(self, bilgiler):
+        # Mail işlemleri için bilgileri çek
+        self.mail_gonderen = bilgiler["mail_gonderen"]
+        self.sifre = bilgiler["mail_app_sifre"]
+        self.mail_alan = bilgiler["mail_alan"]
         # Otomatik renk resetleme işlemi
         colorama.init(autoreset=True)  
         
@@ -20,6 +30,18 @@ class Main():
         
         self.saniye = int(bilgiler["saniye"])
         self.bilgiler = bilgiler
+    
+    async def yanit_bekle(self):
+        try:
+            yanit = await asyncio.wait_for(
+                asyncio.to_thread(input, Fore.BLUE + "[👀] Bilgileri değiştirmek ister misin??? (Y/n) : "),
+                timeout=60  # 1 dakika içinde yanıt gelmezse timeout olacak
+            )
+            return yanit.strip().lower()
+        except asyncio.TimeoutError:
+            print(Fore.RED + "[⏳] Yanıt gelmedi, kontrol ediliyor...")
+            # 1 dakika boyunca yanıt gelmezse n döndür
+            return "n"  
         
     async def basla(self):
         ascii_text = pyfiglet.figlet_format("Zeysnepk") 
@@ -30,38 +52,20 @@ class Main():
         print(Fore.LIGHTWHITE_EX + "[👾] Başlamadan önceee...")
         await asyncio.sleep(0.2)
         print(Fore.CYAN + "[🫷] Lütfen sayfaların açılmasını bekleyiniz!!!")
-        #await asyncio.sleep(0.2)
         try:
-            # kontenjan.basla() ve basvuru.basla() fonksiyonlarını eş zamanlı çalıştır
-            await asyncio.gather(
-            # headless=True ile arka planda çalıştırır
-            self.kontenjan.basla(headless=True), 
-            self.basvuru.basla(headless=True)
-            )  
-            # Arka planda E-Devlet girişi yap
-            # Captcha varsa çözülene kadar bekler
-            await self.basvuru.e_devlet_giris()
-            print(Fore.GREEN + f"[🥳] Captcha çözüldü devam edebilirizzz")
+            await self.kontenjan.basla(headless=True)
         except Exception as e:
-            print(Fore.RED + f"[❌] Hata, sayfalara erişilemedi, bilgilerinizi kontrol ediniz: {str(e)}")
-            
-            # Eğer `self.basvuru` başlatılmışsa bitir
-            if hasattr(self, "browser") and self.basvuru:
-                await self.basvuru.bitir()
-
-            # Eğer `self.kontenjan` başlatılmışsa bitir
-            if hasattr(self, "browser") and self.kontenjan:
-                await self.kontenjan.bitir()
-            # Başarısız çıkış -> 1
-            sys.exit(1)
+            print(Fore.RED + f"[❌] Açılış hatası, e-okul sayfasına erişilemedi. Bilgilerinizi veya internetinizi kontrol ediniz: {str(e)}")
+            await self.yeniden_basla()
             
         while True: 
-            yanit = input(Fore.BLUE + "[👀] Bilgileri değiştirmek ister misin???(Y/n) : ")
-            if yanit.lower() == 'y':
-                print("Tamam Değiştirelim O Zamannn")
-                
+            yanit = await self.yanit_bekle()
+            if yanit == 'y':
+                print(Fore.MAGENTA + f"[⏰] Lütfen e-devlet girişi ile bilgilerin alınmasını bekleyiniz..")
+                await self.basvuru_ac()
                 while True:
                     secim = await self.bilgi_degistir()
+
                     ret = await self.secim_yap(secim)
                     
                     if ret.lower() == 't':
@@ -75,10 +79,9 @@ class Main():
                     else:
                         print(Fore.RED + "[❌] Geçersiz giriş. Lütfen tekrar deneyin.")
                         await asyncio.sleep(0.2)
-                        continue
                 break
                 
-            elif yanit.lower() == 'n':
+            elif yanit == 'n':
                 print(Fore.LIGHTMAGENTA_EX + "[🎉] O zaman başlıyoruuz!!!")
                 await asyncio.sleep(0.2)
                 await self.kontrol_et()
@@ -87,6 +90,18 @@ class Main():
             else:
                 print(Fore.RED + "[👿] Geçersiz giriş. Lütfen tekrar deneyin.")
                 await asyncio.sleep(0.2)
+                
+    async def basvuru_ac(self):
+        try:
+            if hasattr(self.basvuru, "basla"):
+                await self.guvenli_bitir(self.basvuru, "Başvuru Sayfası")
+            await self.basvuru.basla(headless=True)
+            await asyncio.sleep(1)
+            await self.basvuru.e_devlet_giris()
+            print(Fore.GREEN + f"[🥳] Captcha çözüldü devam edebilirizzz")
+        except Exception as e:
+            print(Fore.RED + f"[❌] Açılış hatası, başvuru sayfasına erişilemedi. Bilgilerinizi veya internetinizi kontrol ediniz: {str(e)}")
+            await self.yeniden_basla("B")
                 
     async def kontrol_et(self):
         while True:
@@ -97,8 +112,9 @@ class Main():
             except Exception as e:
                 # Sayfa, onay gününde girişlere kapalı olur
                 print(Fore.RED + f"[❌] Hata, sayfa kapalı olabilir: {str(e)}")
-                await self.kontenjan.bitir()
-                break
+                await asyncio.sleep(self.saniye)
+                await self.yeniden_basla()
+                continue
             await self.kontenjan.bitir()
             print(Fore.GREEN + f"[🔢] Kontenjan sayısı: {kontenjan_sayisi}")
             await asyncio.sleep(0.2)
@@ -106,11 +122,16 @@ class Main():
             # Eğer kontenjan varsa basvuru yap
             if int(kontenjan_sayisi) > 0:
                 print(Fore.CYAN + f"[⭐️] Kontenjan Bulundu Başvuruya Başlanıyor...")
+                await self.basvuru_ac()
+                await asyncio.sleep(1)
                 mesaj = await self.basvuru.basvur()
                 print(Fore.RED + f"[❓] Başvuru Sonucu: {mesaj}")
+                await self.mail_gonder(mesaj)
+                sys.exit(0)
             else:
                 print(Fore.YELLOW + f"[⏰] {self.saniye} saniye sonra tekrar kontrol edilecek!")
             await asyncio.sleep(self.saniye)
+            await self.yeniden_basla()
             
     async def bilgi_degistir(self):
         print(Fore.LIGHTYELLOW_EX + "[🚀] Değiştirebileceğin Alanlar")
@@ -226,6 +247,71 @@ class Main():
             json.dump(self.bilgiler, file, indent=4, ensure_ascii=False)
         
         return input("\n" + Fore.LIGHTRED_EX + "Tamam mı, Devam mı??(T/D): ")
+    
+    async def internet_kontrol(self):
+        try:
+            socket.create_connection(("8.8.8.8", 53), timeout=5)
+            return True
+        except OSError:
+            return False
+    
+    async def guvenli_bitir(self, obj, ad):
+        # Sayfaları güvenli bir şekilde kapatır hata verirse es geçer
+        try:
+            if hasattr(obj, "bitir"):
+                await obj.bitir()
+                print(Fore.GREEN + f"[✅] {ad} başarıyla kapatıldı.")
+            else:
+                print(Fore.YELLOW + f"[💤] {ad} zaten kapalıydı veya mevcut değil.")
+        except Exception as e:
+            print(Fore.RED + f"[❌] {ad} kapatılırken hata oluştu: {str(e)}")
+    
+    async def yeniden_basla(self, kontrol="K"):
+        try:
+            while not await self.internet_kontrol():
+                print(Fore.YELLOW + "[⚠️] İnternet bağlantısı yok, bekleniyor...")
+                await asyncio.sleep(60)
+            # Sayfalar açıksa bitir
+            if kontrol == "K":
+                await self.guvenli_bitir(self.kontenjan, "Kontenjan Sayfası")
+                await self.kontenjan.basla(headless=True)
+            elif kontrol == "B":
+                await self.guvenli_bitir(self.basvuru, "Başvuru Sayfası")
+                await self.basvuru_ac()
+            elif kontrol == "KB":
+                await self.guvenli_bitir(self.kontenjan, "Kontenjan Sayfası")
+                await self.guvenli_bitir(self.basvuru, "Başvuru Sayfası")
+                await asyncio.gather(
+                    self.kontenjan.basla(headless=True), 
+                    self.basvuru.basla(headless=True)
+                )  
+                await asyncio.sleep(1)
+                await self.basvuru.e_devlet_giris()
+        except Exception as e:
+            print(Fore.RED + f"[❌] Hata, yeniden başlatılamadı, bilgilerinizi kontrol ediniz: {str(e)}")
+            
+            await asyncio.sleep(self.saniye)
+            await self.yeniden_basla()
+            
+    async def mail_gonder(self, mesaj):
+        try:
+            server = smtplib.SMTP("smtp.gmail.com", 587)
+            server.starttls()  # Bağlantıyı güvenli hale getir
+            server.login(self.mail_gonderen, self.sifre)
+            
+            # Mail içeriği
+            msg = MIMEMultipart()
+            msg["From"] = self.mail_gonderen
+            msg["To"] = self.mail_alan
+            msg["Subject"] = f"{self.bilgiler["okul"]} kontenjan bulundu!"
+            msg.attach(MIMEText(f"{self.bilgiler["kimlik_no"]} numaları öğrencinin nakil başvuru sonucu:\n{mesaj}", "plain"))
+            
+            server.sendmail(self.mail_gonderen, self.mail_alan, msg.as_string())
+            server.quit()
+            print(Fore.GREEN + "[📧] Mail başarıyla gönderildi!")
+
+        except Exception as e:
+            print(Fore.RED + f"[❌] Hata, mail gönderilemedi: {str(e)}")
         
 async def main_basla():
     await main.basla()

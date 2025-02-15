@@ -1,5 +1,8 @@
 {
-    "saniye": "7200",
+    "mail_gonderen" : "",
+    "mail_app_sifre" : "",
+    "mail_alan" : "",
+    "saniye": "600",
     "kimlik_no": "",
     "okul_no": "",
     "il": "KOCAELİ",

@@ -40,12 +40,13 @@ class Kontenjan():
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.chromium.launch(headless=headless)
             self.page = await self.browser.new_page()
-            await self.page.goto(self.url, wait_until="networkidle")
+            await self.page.goto(self.url, wait_until="networkidle", timeout=10000)
             await self.page.wait_for_timeout(100)
             
     async def bitir(self):
         if self.browser:
-            await self.page.wait_for_timeout(100)
+            if self.page:
+                await self.page.close()
             await self.browser.close()
             await self.playwright.stop()
             self.browser = None
@@ -139,6 +140,10 @@ class Kontenjan():
     async def okul_sayisi(self):
         await self.tum_bilgileri_gir()
         return await self.page.locator('#lblOkulSayisi').inner_text()
+    
+    async def sayfayi_yenile(self):
+        await self.page.reload()
+        await self.page.wait_for_load_state("domcontentloaded", timeout=5000) 
     
 async def main_basla(kontenjan):
         await kontenjan.basla()

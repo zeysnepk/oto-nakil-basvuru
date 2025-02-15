@@ -38,13 +38,14 @@ class Basvuru():
         self.browser = None
         self.page = None
         self.playwright = None
+        self.basvuru_sayfasi = None
         
     async def basla(self, headless=False):
         if self.browser is None:
             self.playwright = await async_playwright().start()
             self.browser = await self.playwright.chromium.launch(headless=headless)
             self.page = await self.browser.new_page()
-            await self.page.goto(self.edevlet_url, wait_until="networkidle")
+            await self.page.goto(self.edevlet_url, wait_until="networkidle", timeout=10000)
             self.page.on("dialog", lambda dialog: dialog.accept())
             await self.page.wait_for_timeout(100)
             
@@ -52,11 +53,15 @@ class Basvuru():
         if self.browser:
             if self.basvuru_sayfasi:
                 await self.basvuru_sayfasi.close()
-            await self.page.wait_for_timeout(100)
+            if self.page:
+                await self.page.close()
             await self.browser.close()
+        if self.playwright:
             await self.playwright.stop()
-            self.browser = None
-            self.page = None   
+        self.browser = None
+        self.page = None   
+        self.playwright = None
+        self.basvuru_sayfasi = None
             
     async def doldur(self, secim, deger):
         await self.page.wait_for_selector(secim, state="visible", timeout=5000)
@@ -64,10 +69,14 @@ class Basvuru():
         await self.page.wait_for_timeout(100)
                    
     async def tikla_option(self, secim_dropdown, deger):
-        await self.basvuru_sayfasi.wait_for_selector(secim_dropdown, state="visible", timeout=5000)
-        await self.basvuru_sayfasi.locator(secim_dropdown).click()
-        await self.basvuru_sayfasi.select_option(secim_dropdown, label=deger)
-        await self.basvuru_sayfasi.wait_for_timeout(100)
+        try:
+            await self.basvuru_sayfasi.wait_for_selector(secim_dropdown, state="visible", timeout=5000)
+            await self.basvuru_sayfasi.locator(secim_dropdown).click()
+            await self.basvuru_sayfasi.select_option(secim_dropdown, label=deger)
+            await self.basvuru_sayfasi.wait_for_timeout(100)
+        except Exception:
+            print("Option seçenekleri aktif değil!")
+            await asyncio.sleep(1)
         
     async def nakil_nedeni_gir(self):
         await self.tikla_option(self.neden_input, self.bilgiler["nakil_nedeni"])
@@ -117,6 +126,7 @@ class Basvuru():
             return "bilmiyorum"
         
     async def e_devlet_giris(self):
+        self.dongu = True
         await self.page.locator(self.dogrula_buton).click()     
         await self.page.wait_for_timeout(1000)
         await self.doldur(self.tc_input, self.bilgiler["edevlet_no"])  
@@ -151,7 +161,8 @@ class Basvuru():
                 print("captcha yok")
                 break
         # Butonun sayfada görünmesini bekle
-        await self.page.wait_for_selector(self.baglan_buton, state="visible", timeout=5000)
+        await self.page.wait_for_load_state("networkidle")
+        await self.page.wait_for_selector(self.baglan_buton, state="attached", timeout=5000)
         # Butona bastıktan sonra yeni açılan pop-up bilgisi
         async with self.page.expect_popup(timeout=60000) as popup_info:
             await self.page.locator(self.baglan_buton).click() 
@@ -208,10 +219,9 @@ class Basvuru():
         return await self.secenekleri_dondur('#ddlOkulYabanciDil > option')
     
     async def basvur(self):
-        await basvuru.e_devlet_giris()
-        await basvuru.basvuru_yap()
-        mesaj = await basvuru.mesaj()
-        await basvuru.bitir()
+        await self.basvuru_yap()
+        mesaj = await self.mesaj()
+        await self.bitir()
         return mesaj
     
     
