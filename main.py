@@ -35,7 +35,7 @@ class Main():
     async def yanit_bekle(self):
         try:
             yanit = await asyncio.wait_for(
-                asyncio.to_thread(input, Fore.BLUE + "[👀] Bilgileri değiştirmek ister misin??? (Y/n) : "),
+                asyncio.to_thread(input, Fore.BLUE + "[👀] Bilgileri değiştirmek ister misinizz??? (Y/n) : "),
                 timeout=60  # 1 dakika içinde yanıt gelmezse timeout olacak
             )
             return yanit.strip().lower()
