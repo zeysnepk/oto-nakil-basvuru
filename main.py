@@ -5,7 +5,6 @@ import json
 import asyncio
 import sys
 import socket
-import time
 
 from kontenjan import Kontenjan
 from basvuru import Basvuru
