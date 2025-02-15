@@ -48,7 +48,7 @@ E-posta bildirimlerini etkinleştirmek için:
 
 1. Projeyi bilgisayarınıza indirin:
 ```bash
-git clone https://github.com/kullaniciadi/oto-nakil-basvuru.git
+git clone https://github.com/zeysnepk/oto-nakil-basvuru.git
 cd okul-nakil-otomasyonu
 ```
 
