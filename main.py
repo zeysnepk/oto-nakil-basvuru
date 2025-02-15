@@ -178,7 +178,11 @@ class Main():
         for idx, secenek in enumerate(degisken, start=1):
             print(f"[{idx}] {secenek}")
         secenek = int(input("\n" + Fore.LIGHTRED_EX + f"{ad} Seçiniz: "))
-        self.bilgiler[f"{json_ad}"] = degisken[secenek - 1]
+        try:
+            self.bilgiler[f"{json_ad}"] = degisken[secenek - 1]
+        except IndexError:
+            print(Fore.RED + f"[��] Hata, {ad} numarasına sahip bir secenek bulunamadı!! Lütfen tekrar deneyiniz: ")
+            await self.secenek_gir(degisken, ad, json_ad)
     
     async def secim_yap(self, secim):
         print()
@@ -236,8 +240,8 @@ class Main():
                     # Başarılı çıkış -> 0
                     sys.exit(0)
                 case _:
-                    print(Fore.LIGHTRED_EX + "Geçersiz Seçim!")
-                    await asyncio.sleep(0.5)
+                    secim = input(Fore.LIGHTRED_EX + "Geçersiz Seçim! Lütfen tekrar deneyiniz: ")
+                    await asyncio.sleep(0.2)
                     return await self.secim_yap(secim)
         except Exception as e:
             print(Fore.RED + f"[❌] Hata, sayfada giriş yapılamıyor olabilir: {str(e)}")
