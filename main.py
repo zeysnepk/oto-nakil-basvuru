@@ -1,332 +1,261 @@
-import colorama
-from colorama import Fore, Style
-import pyfiglet
 import json
 import asyncio
+from playwright.async_api import async_playwright
 import sys
-import socket
-
-from kontenjan import Kontenjan
-from basvuru import Basvuru
-
-json_dosyasi = "config.json"
-
+import easyocr
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import socket
 
-class Main():
+dosya = "bilgiler.json"
+kontenjan_url = "https://e-okul.meb.gov.tr/OrtaOgretim/OKL/OOK06011.aspx"
+nakil_url = "https://www.turkiye.gov.tr/meb-ogrenci-nakil-islemi"
+
+class Nakil():
     def __init__(self, bilgiler):
-        # Mail işlemleri için bilgileri çek
-        self.mail_gonderen = bilgiler["mail_gonderen"]
-        self.sifre = bilgiler["mail_app_sifre"]
-        self.mail_alan = bilgiler["mail_alan"]
-        # Otomatik renk resetleme işlemi
-        colorama.init(autoreset=True)  
-        
-        self.kontenjan = Kontenjan(bilgiler)
-        self.basvuru = Basvuru(bilgiler)
-        
-        self.saniye = int(bilgiler["saniye"])
         self.bilgiler = bilgiler
         
-        self.basvuru_acik = False
-    
-    async def yanit_bekle(self):
-        try:
-            yanit = await asyncio.wait_for(
-                asyncio.to_thread(input, Fore.BLUE + "[👀] Bilgileri değiştirmek ister misinizz??? (Y/n) : "),
-                timeout=60  # 1 dakika içinde yanıt gelmezse timeout olacak
-            )
-            return yanit.strip().lower()
-        except asyncio.TimeoutError:
-            print(Fore.RED + "[⏳] Yanıt gelmedi, kontrol ediliyor...")
-            # 1 dakika boyunca yanıt gelmezse n döndür
-            return "n"  
+        self.playwright = None
+        self.browser = None
+        self.page = None
         
-    async def basla(self):
-        ascii_text = pyfiglet.figlet_format("Zeysnepk") 
-        print(Fore.MAGENTA + Style.BRIGHT + ascii_text)
-        await asyncio.sleep(0.2)
-        print(Fore.YELLOW + "[👻] Merhaba...")
-        await asyncio.sleep(0.2)
-        print(Fore.LIGHTWHITE_EX + "[👾] Başlamadan önceee...")
-        await asyncio.sleep(0.2)
-        print(Fore.CYAN + "[🫷] Lütfen sayfaların açılmasını bekleyiniz!!!")
-        try:
-            await self.kontenjan.basla(headless=True)
-        except Exception as e:
-            print(Fore.RED + f"[❌] Açılış hatası, e-okul sayfasına erişilemedi. Bilgilerinizi veya internetinizi kontrol ediniz: {str(e)}")
-            await self.yeniden_basla()
+        # Kontenjan Sayfası CSS
+        self.tc_input = 'input[name="txtTcKimlikNo"]'
+        self.okul_no_input = 'input[name="txtOkulNo"]'
+        self.il_dropdown = '#ddlIl_K_chzn > a'
+        self.il_sec = '#ddlIl_K_chzn > div > ul > li'
+        self.ilce_dropdown = '#ddlIlce_chzn > a'
+        self.ilce_sec = '#ddlIlce_chzn > div > ul > li'
+        self.kurum_turu_dropdown = '#ddlKurumTuru'
+        self.kayit_alani_dropdown = '#ddlKayitAlani'
+        self.okul_dropdown = '#ddlOkul_chzn > a'
+        self.okul_sec = '#ddlOkul_chzn > div > ul > li'
+        self.listele_buton = 'input[value="Listele"]'
+        self.sinif = int(self.bilgiler["sinif"]) - 6
+        self.sinif_kontenjan = f"#dgListe > tbody > tr:nth-child(2) > td:nth-child({self.sinif})"
+        
+        # Nakil Sayfası CSS
+        self.dogrula_buton = '#contentStart > div > div.authAction > a'
+        self.tc_input2 = 'input[name="tridField"]'
+        self.sifre_input = 'input[name="egpField"]'
+        self.giris_buton = 'button[name="submitButton"]'
+        self.captcha_img = '#loginForm > fieldset > div:nth-child(4) > div > img'
+        self.captcha_input = 'input[name="captchaField"]'
+        self.hata_metin = '#loginForm > fieldset > div.form-row.required.form-error > div > span:nth-child(5)'   
+        self.baglan_buton = '#contentStart > div.resultContainer > div > table > tbody > tr > td:nth-child(3) > a'
+        self.neden_input = '#ddlNakilNedeni'
+        self.tur_input = '#ddlNakilTurleri'
+        self.alan_input = '#ddlNakilAlanlari'
+        self.dal_input = '#ddlNakilDali'
+        self.il_input = '#ddlBasvuruIli'
+        self.okul_input = '#ddlBasvuruKurum'
+        self.dil_input = '#ddlOkulYabanciDil'
+        self.tik_at = 'input[name="chkNakil"]'
+        self.kaydet_buton = 'input[name="btnKaydet"]'
+        
+    async def browser_ac(self):
+        if self.browser is None:
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.chromium.launch(headless=True)
             
-        while True: 
-            yanit = await self.yanit_bekle()
-            if yanit == 'y':
-                print(Fore.MAGENTA + f"[⏰] Lütfen e-devlet girişi ile bilgilerin alınmasını bekleyiniz..")
-                await self.basvuru_ac()
-                while True:
-                    secim = await self.bilgi_degistir()
+    async def sayfa_ac(self, url):
+        self.page = await self.browser.new_page()
+        await self.page.goto(url, wait_until="networkidle", timeout=10000)
+        self.page.on("dialog", lambda dialog: dialog.accept())
+        
+    async def sayfa_kapa(self):
+        if self.page:
+            await self.page.close()
+            self.page = None
+            
+    async def browser_kapa(self):
+        if self.browser:
+            await self.browser.close()
+            self.browser = None
+            
+    async def sayfa_yenile(self):
+        if self.page:
+            await self.page.reload()
+            
+    async def doldur(self, secim, deger):
+        await self.page.wait_for_selector(secim, state="visible", timeout=5000)
+        await self.page.fill(secim, deger)
+        await self.page.wait_for_timeout(100)
+        
+    async def tikla_filter(self, secim_dropdown, secim, deger):
+        await self.page.wait_for_selector(secim_dropdown, state="visible", timeout=5000)
+        await self.page.locator(secim_dropdown).click()
+        await self.page.wait_for_selector(secim, state="visible", timeout=5000)
+        await self.page.locator(secim).filter(has_text=deger).click()
+        await self.page.wait_for_timeout(100)
+                   
+    async def tikla_option(self, secim_dropdown, deger):
+        await self.page.wait_for_selector(secim_dropdown, state="attached", timeout=10000)
+        await self.page.locator(secim_dropdown).click()
+        await self.page.select_option(secim_dropdown, label=deger)
+        await self.page.wait_for_timeout(100)
+            
+    async def kontenjan_kontrol(self, okul):
+        await self.doldur(self.tc_input, self.bilgiler["kimlik_no"])
+        await self.doldur(self.okul_no_input, self.bilgiler["okul_no"])
+        await self.tikla_filter(self.il_dropdown, self.il_sec, self.bilgiler["il"])
+        await self.tikla_filter(self.ilce_dropdown, self.ilce_sec, self.bilgiler["ilce"])
+        await self.tikla_option(self.kurum_turu_dropdown, self.bilgiler["kurum_turu"])
+        await self.tikla_option(self.kayit_alani_dropdown, self.bilgiler["kayit_alani"])
+        await self.tikla_filter(self.okul_dropdown, self.okul_sec, okul)
+        await self.page.locator(self.listele_buton).click()
+        await self.page.wait_for_timeout(100)
+        kontenjan = await self.page.locator(self.sinif_kontenjan).inner_text()
+        return int(kontenjan)
+    
+    def captcha_coz(self, image_path):
+        try:
+            reader = easyocr.Reader(['en']) 
+            captcha_text = reader.readtext(image_path, detail=0)
 
-                    ret = await self.secim_yap(secim)
-                    
-                    if ret.lower() == 't':
-                        print(Fore.GREEN + "[🤩] Başarılı Bir Şekilde Güncelleme Yapıldı!")
-                        await asyncio.sleep(0.2)
-                        print(Fore.LIGHTCYAN_EX + "[🙀] Kontenjan Kontrolüne Başlıyoruuuz...!")
-                        await self.kontrol_et()
-                        break
-                    elif ret.lower() == 'd':
-                        await asyncio.sleep(0.2)
-                    else:
-                        print(Fore.RED + "[❌] Geçersiz giriş. Lütfen tekrar deneyin.")
-                        await asyncio.sleep(0.2)
-                break
-                
-            elif yanit == 'n':
-                print(Fore.LIGHTMAGENTA_EX + "[🎉] O zaman başlıyoruuz!!!")
-                await asyncio.sleep(0.2)
-                await self.kontrol_et()
-                break
-            
-            else:
-                print(Fore.RED + "[👿] Geçersiz giriş. Lütfen tekrar deneyin.")
-                await asyncio.sleep(0.2)
-                
-    async def basvuru_ac(self):
-        try:
-            if self.basvuru_acik:
-                await self.guvenli_bitir(self.basvuru, "Başvuru Sayfası")
-            await self.basvuru.basla(headless=True)
-            await asyncio.sleep(1)
-            await self.basvuru.e_devlet_giris()
-            print(Fore.GREEN + f"[🥳] Captcha çözüldü devam edebilirizzz")
-            self.basvuru_acik = True
+            return captcha_text[0]
         except Exception as e:
-            print(Fore.RED + f"[❌] Açılış hatası, başvuru sayfasına erişilemedi. Bilgilerinizi veya internetinizi kontrol ediniz: {str(e)}")
-            await self.yeniden_basla("B")
+            print(f"Captcha okunamadı: {e}")
+            return "bilmiyorum"
+    
+    async def e_devlet_giris(self):
+        self.dongu = True
+        await self.page.locator(self.dogrula_buton).click()     
+        await self.page.wait_for_timeout(1000)
+        await self.doldur(self.tc_input2, self.bilgiler["edevlet_no"])  
+        await self.doldur(self.sifre_input, self.bilgiler["edevlet_sifre"])
+        await self.page.locator(self.giris_buton).click()
+        await self.page.wait_for_timeout(1000)
+        
+        # Captcha çözülene kadar tekrar tekrar dene
+        while self.dongu:
+            captcha = await self.page.locator(self.captcha_img).is_visible()
+            if captcha:
+                print("captcha var")
+                captcha_path = "captcha.png"
+                await self.page.locator(self.captcha_img).screenshot(path=captcha_path)
+                captcha_text = self.captcha_coz(captcha_path)
                 
-    async def kontrol_et(self):
+                print(f"Okunan Captcha Kodu: {captcha_text}")
+                
+                await self.page.fill(self.captcha_input, captcha_text)
+                await self.page.fill(self.sifre_input, self.bilgiler["edevlet_sifre"])
+                await self.page.locator(self.giris_buton).click()
+                
+                # Hata mesajı varsa captcha çözülememiş tekrar döngüde
+                hata_metin = await self.page.locator(self.hata_metin).is_visible()
+                
+                # Hata mesajı yoksa döngüden çık
+                if not hata_metin:
+                        self.dongu = False
+
+            # Captcha yoksa döngüden çık
+            else: 
+                print("captcha yok")
+                break
+        # Butonun sayfada görünmesini bekle
+        await self.page.wait_for_load_state("networkidle")
+        await self.page.wait_for_selector(self.baglan_buton, state="attached", timeout=5000)
+        # Butona bastıktan sonra yeni açılan pop-up bilgisi
+        async with self.page.expect_popup(timeout=60000) as popup_info:
+            await self.page.locator(self.baglan_buton).click() 
+
+        # Yeni açılan sayfaya geç
+        self.page = await popup_info.value
+        await self.page.wait_for_load_state("networkidle")
+        await self.page.wait_for_load_state("domcontentloaded")
+        
+        # Sayfaya gelen mesajlar için oto kabul et
+        self.page.on("dialog", lambda dialog: dialog.accept())
+        await self.page.wait_for_load_state("networkidle")
+        await self.page.wait_for_timeout(1000)
+    
+    async def basvuru_yap(self, okul):
+        await self.tikla_option(self.neden_input, self.bilgiler["nakil_nedeni"])
+        await self.tikla_option(self.tur_input, self.bilgiler["gidilecek_tur"])
+        await self.tikla_option(self.alan_input, self.bilgiler["gidilecek_alan"])
+        await self.tikla_option(self.dal_input, self.bilgiler["gidilecek_dal"])
+        await self.tikla_option(self.il_input, self.bilgiler["il"])
+        await self.tikla_option(self.okul_input, okul)
+        await self.tikla_option(self.dil_input, self.bilgiler["yabanci_dil"])
+        await self.page.locator(self.tik_at).click()
+        await self.page.locator(self.kaydet_buton).click()
+        await self.page.wait_for_timeout(100)
+        return await self.page.locator('#lblHata').inner_text()
+        
+def mail_gonder(okul, mesaj):
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls() 
+        server.login(bilgiler["mail_gonderen"], bilgiler["mail_app_sifre"])
+        msg = MIMEMultipart()
+        msg["From"] = bilgiler["mail_gonderen"]
+        msg["To"] = bilgiler["mail_alan"]
+        msg["Subject"] = f"{okul} kontenjan bulundu!"
+        msg.attach(MIMEText(f"{bilgiler["kimlik_no"]} numaralı öğrencinin nakil başvuru bilgilendirme:\n{mesaj}", "plain"))
+        server.sendmail(bilgiler["mail_gonderen"], bilgiler["mail_alan"], msg.as_string())
+        server.quit()
+        print("Mail başarıyla gönderildi!")
+    except Exception as e:
+        print(f"Mail gönderilirken hata oluştu: {e}")
+    
+def internet_kontrol():
+    try:
+        socket.create_connection(("8.8.8.8", 53), timeout=5)
+        return True
+    except OSError:
+        print("İnternet bağlantısı yok")
+        return False
+        
+    
+async def basla():
+    try:
+        print("Browser açılıyor...")
+        await nakil.browser_ac()
+        print("Kontenjan sayfası açılıyor...")
         while True:
-            print(Fore.YELLOW + "[👀] Kontenjan Kontrolü...")
-            await asyncio.sleep(0.2)
-            try:
-                kontenjan_sayisi = await self.kontenjan.kontenjan_kontrol()
-            except Exception as e:
-                # Sayfa, onay gününde girişlere kapalı olur
-                print(Fore.RED + f"[❌] Hata, sayfa kapalı olabilir: {str(e)}")
-                await asyncio.sleep(self.saniye)
-                await self.yeniden_basla()
-                continue
-            await self.kontenjan.bitir()
-            print(Fore.GREEN + f"[🔢] Kontenjan sayısı: {kontenjan_sayisi}")
-            await asyncio.sleep(0.2)
-            
-            # Eğer kontenjan varsa basvuru yap
-            if int(kontenjan_sayisi) > 0:
-                print(Fore.CYAN + f"[⭐️] Kontenjan Bulundu Başvuruya Başlanıyor...")
-                await self.basvuru_ac()
+            await nakil.sayfa_ac(kontenjan_url)
+            for okul in bilgiler["okul"]:
+                kontenjan = await nakil.kontenjan_kontrol(okul)
+                print(f"{okul} okulunun kontenjan sayısı: {kontenjan}")
                 await asyncio.sleep(1)
-                await self.mail_gonder("Kontenjan Bulundu Başvuruya Başlanıyor...")
-                mesaj = await self.basvuru.basvur()
-                print(Fore.RED + f"[❓] Başvuru Sonucu: {mesaj}")
-                await self.mail_gonder(mesaj)
-                sys.exit(0)
-            else:
-                print(Fore.YELLOW + f"[⏰] {self.saniye} saniye sonra tekrar kontrol edilecek!")
-            await asyncio.sleep(self.saniye)
-            await self.yeniden_basla()
-            
-    async def bilgi_degistir(self):
-        print(Fore.LIGHTYELLOW_EX + "[🚀] Değiştirebileceğin Alanlar")
-        await asyncio.sleep(0.2)
-        print(Fore.YELLOW + "------------------------------------------------")
-        await asyncio.sleep(0.2)
+                if( kontenjan > 0 ):
+                    print(f"{okul} için kontenjan bulundu maili gönderiliyor...")
+                    mail_gonder(okul, "Kontenjana Başlanıyor")
+                    print("Kontenjan sayfası kapanıyor...")
+                    await nakil.sayfa_kapa()
+                    print("E-Devlet sayfası açılıyor...")
+                    await nakil.sayfa_ac(nakil_url)
+                    await asyncio.sleep(1)
+                    await nakil.e_devlet_giris()
+                    await asyncio.sleep(1)
+                    print("Başvuru yapılıyor...")
+                    nakil_okul_in = bilgiler["okul"].index(okul)
+                    nakil_okul = bilgiler["gidilecek_okul"].pop(nakil_okul_in)
+                    mesaj = await nakil.basvuru_yap(nakil_okul)
+                    print(f"Başvuru Sonucu: {mesaj}")
+                    mail_gonder(okul, "Kontenjana Başlanıyor")
+                    await asyncio.sleep(1)
+                    print("Başvuru sayfası kapanıyor...")
+                    await nakil.sayfa_kapa()
+                    print("Browser kapatılıyor...")
+                    await nakil.browser_kapa()
+                    sys.exit(0)    
+                print("Kontenjan sayfası tekrar yükleniyor...")
+                await nakil.sayfa_yenile()
+            await nakil.sayfa_kapa()
+            await asyncio.sleep(int(bilgiler["saniye"])) 
+    except Exception as e:
+        if not internet_kontrol():
+            print("Bağlantı yok, tekrar denenecek...")
+        print(f"Hata: {e}")
+        await asyncio.sleep(10)
+        await basla()
         
-        print(Fore.MAGENTA + """ 
-[1]  TC KİMLİK NUMARASI
-[2]  OKUL NUMARASI
-[3]  İL
-[4]  İLÇE
-[5]  KURUM TÜRÜ
-[6]  KAYIT ALANI
-[7]  OKUL
-[8]  SINIF
-[9]  E-DEVLET KİMLİK NO
-[10] E-DEVLET ŞİFRE
-[11] NAKİL NEDENİ
-[12] GİDİLECEK OKUL TÜRÜ
-[13] GİDİLECEK OKUL ALANI
-[14] GİDİLECEK OKUL DALI
-[15] GİDİLECEK OKUL
-[16] YABANCI DİL
-[17] KONTROL ARALIK SIKLIĞI
-        """)
-        await asyncio.sleep(0.2)
-        print(Fore.RED + "[🤓] NOT: Her şeyi doldurmak zorunda değilsiniz boş kalabilir!!!")
-        await asyncio.sleep(0.2)
-        print(Fore.LIGHTYELLOW_EX + "[❎] Çıkış yapmak için 'x' e basınız!")
-        return input("\n" + Fore.GREEN + "Lütfen seçimini giriniz(!sayı!) : ")
-    
-    async def secenek_gir(self, degisken, ad, json_ad):
-        # Giriş verilerinde uyuşmazlık varsa hata döndür
-        if degisken == []:
-            print(Fore.RED + f"[🔺] Hata, {ad} alınamadı!!")
-            await self.kontenjan.bitir()
-            await self.basvuru.bitir()
-            sys.exit(1)
-        # Seçeneklerin listelenip indexlerine göre kullanıcıya sunulur
-        for idx, secenek in enumerate(degisken, start=1):
-            print(f"[{idx}] {secenek}")
-        secenek = int(input("\n" + Fore.LIGHTRED_EX + f"{ad} Seçiniz: "))
-        try:
-            self.bilgiler[f"{json_ad}"] = degisken[secenek - 1]
-        except IndexError:
-            print(Fore.RED + f"[��] Hata, {ad} numarasına sahip bir secenek bulunamadı!! Lütfen tekrar deneyiniz: ")
-            await self.secenek_gir(degisken, ad, json_ad)
-    
-    async def secim_yap(self, secim):
-        print()
-        try:
-            match secim:
-                case '1':
-                    self.bilgiler["kimlik_no"] = input("TC Kimlik No Girin: ")
-                case '2':
-                    self.bilgiler["okul_no"] = input("Okul No Girin: ")
-                case '3':
-                    iller = await self.kontenjan.illeri_listele()
-                    await self.secenek_gir(iller, "İl", "il")
-                case '4':
-                    ilceler = await self.kontenjan.ilceleri_listele()
-                    await self.secenek_gir(ilceler, "İlce", "ilce")
-                case '5':
-                    kurum_turu = await self.kontenjan.kurum_turleri_listele()
-                    await self.secenek_gir(kurum_turu, "Kurum Türü", "kurum_turu")
-                case '6':
-                    alanlar = await self.kontenjan.kayit_alanlari_listele()
-                    await self.secenek_gir(alanlar, "Kayıt Alanı", "kayit_alani")
-                case '7':
-                    okullar = await self.kontenjan.okullari_listele()
-                    await self.secenek_gir(okullar, "Okul", "okul")
-                case '8':
-                    self.bilgiler["sinif"] = input("Sınıf Girin: ")
-                case '9':
-                    self.bilgiler["edevlet_no"] = input("E-Devlet Kimlik No Girin: ")
-                case '10':
-                    self.bilgiler["edevlet_sifre"] = input("E-Devlet Şifre Girin: ")
-                case '11':
-                    nedenler = await self.basvuru.nedenleri_listele()
-                    await self.secenek_gir(nedenler, "Neden", "nakil_nedeni")
-                case '12':
-                    turler = await self.basvuru.turleri_listele()
-                    await self.secenek_gir(turler, "Tür", "gidilecek_tur")
-                case '13':
-                    alanlar = await self.basvuru.alanlari_listele()
-                    await self.secenek_gir(alanlar, "Okul Alanı", "gidilecek_alan")
-                case '14':
-                    dallar = await self.basvuru.dallari_listele()
-                    await self.secenek_gir(dallar, "Okul Dalı", "gidilecek_dal")
-                case '15':
-                    okullar = await self.basvuru.okullari_listele()
-                    await self.secenek_gir(okullar, "Okul", "gidilecek_okul")
-                case '16':
-                    diller = await self.basvuru.dilleri_listele()
-                    await self.secenek_gir(diller, "Dil", "yabanci_dil")
-                case '17':
-                    self.saniye = int(input("Kontrol Aralık Sıklığı (saniye): "))
-                    self.bilgiler["saniye"] = self.saniye
-                case 'x' | 'X':
-                    await self.kontenjan.bitir()
-                    await self.basvuru.bitir()
-                    # Başarılı çıkış -> 0
-                    sys.exit(0)
-                case _:
-                    secim = input(Fore.LIGHTRED_EX + "Geçersiz Seçim! Lütfen tekrar deneyiniz: ")
-                    await asyncio.sleep(0.2)
-                    return await self.secim_yap(secim)
-        except Exception as e:
-            print(Fore.RED + f"[❌] Hata, sayfada giriş yapılamıyor olabilir: {str(e)}")
-            await self.kontenjan.bitir()
-            sys.exit(1)
-                
-        await asyncio.sleep(0.2)
-        # Girilen verileri json dosyasına yazdır
-        with open(json_dosyasi, "w", encoding="utf-8") as file:
-            json.dump(self.bilgiler, file, indent=4, ensure_ascii=False)
         
-        return input("\n" + Fore.LIGHTRED_EX + "Tamam mı, Devam mı??(T/D): ")
-    
-    async def internet_kontrol(self):
-        try:
-            socket.create_connection(("8.8.8.8", 53), timeout=5)
-            return True
-        except OSError:
-            return False
-    
-    async def guvenli_bitir(self, obj, ad):
-        # Sayfaları güvenli bir şekilde kapatır hata verirse es geçer
-        try:
-            if hasattr(obj, "bitir"):
-                await obj.bitir()
-                print(Fore.GREEN + f"[✅] {ad} başarıyla kapatıldı.")
-            else:
-                print(Fore.YELLOW + f"[💤] {ad} zaten kapalıydı veya mevcut değil.")
-        except Exception as e:
-            print(Fore.RED + f"[❌] {ad} kapatılırken hata oluştu: {str(e)}")
-    
-    async def yeniden_basla(self, kontrol="K"):
-        try:
-            while not await self.internet_kontrol():
-                print(Fore.YELLOW + "[⚠️] İnternet bağlantısı yok, bekleniyor...")
-                await asyncio.sleep(60)
-            # Sayfalar açıksa bitir
-            if kontrol == "K":
-                await self.guvenli_bitir(self.kontenjan, "Kontenjan Sayfası")
-                await self.kontenjan.basla(headless=True)
-            elif kontrol == "B":
-                await self.guvenli_bitir(self.basvuru, "Başvuru Sayfası")
-                await self.basvuru_ac()
-            elif kontrol == "KB":
-                await self.guvenli_bitir(self.kontenjan, "Kontenjan Sayfası")
-                await self.guvenli_bitir(self.basvuru, "Başvuru Sayfası")
-                await asyncio.gather(
-                    self.kontenjan.basla(headless=True), 
-                    self.basvuru.basla(headless=True)
-                )  
-                await asyncio.sleep(1)
-                await self.basvuru.e_devlet_giris()
-        except Exception as e:
-            print(Fore.RED + f"[❌] Hata, yeniden başlatılamadı, bilgilerinizi kontrol ediniz: {str(e)}")
-            
-            await asyncio.sleep(self.saniye)
-            await self.yeniden_basla()
-            
-    async def mail_gonder(self, mesaj):
-        try:
-            server = smtplib.SMTP("smtp.gmail.com", 587)
-            server.starttls()  # Bağlantıyı güvenli hale getir
-            server.login(self.mail_gonderen, self.sifre)
-            
-            # Mail içeriği
-            msg = MIMEMultipart()
-            msg["From"] = self.mail_gonderen
-            msg["To"] = self.mail_alan
-            msg["Subject"] = f"{self.bilgiler["okul"]} kontenjan bulundu!"
-            msg.attach(MIMEText(f"{self.bilgiler["kimlik_no"]} numaralı öğrencinin nakil başvuru bilgilendirme:\n{mesaj}", "plain"))
-            
-            server.sendmail(self.mail_gonderen, self.mail_alan, msg.as_string())
-            server.quit()
-            print(Fore.GREEN + "[📧] Mail başarıyla gönderildi!")
-
-        except Exception as e:
-            print(Fore.RED + f"[❌] Hata, mail gönderilemedi: {str(e)}")
+with open(dosya, 'r', encoding='utf-8') as file:
+    bilgiler = json.load(file)
         
-async def main_basla():
-    await main.basla()
-        
-if __name__ == "__main__":
-    # Bilgileri json dosyasından oku
-    with open(json_dosyasi, 'r', encoding='utf-8') as file:
-        json_bilgiler = json.load(file)
-        
-    main = Main(json_bilgiler)
-    asyncio.run(main_basla())
+nakil = Nakil(bilgiler)
+asyncio.run(basla())
