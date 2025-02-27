@@ -8,7 +8,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import socket
 
-dosya = "bilgiler.json"
+dosya = "config.json"
 kontenjan_url = "https://e-okul.meb.gov.tr/OrtaOgretim/OKL/OOK06011.aspx"
 nakil_url = "https://www.turkiye.gov.tr/meb-ogrenci-nakil-islemi"
 
